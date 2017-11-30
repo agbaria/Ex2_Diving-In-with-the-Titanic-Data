@@ -1,0 +1,165 @@
+---
+title: "ex2"
+author: "Alaa Agbaria"
+date: "November 29, 2017"
+output: html_document
+---
+
+```{r}
+train <- read.csv("train.csv",  na.strings = "")
+test <- read.csv("test.csv", na.strings = "")
+ids <- test$PassengerId
+test$Survived <- NA
+df <- rbind(train, test)
+str(df)
+```
+
+## Preprocessing
+I applied the same preprocessing for all the algorithems: [with help from the internet:)]
+
+1. By looking at the passenger names, it seems that some of the passengers have a rare titles (Don, Countess, ..) and most of them have reqular titles (Mr, Mrs, ..). So perhaps those with rare titles who belong to the high society, had more chance to survive than the others.
+
+2. The age feature is important for learning the model, but it has too many NA's:
+```{r}
+sum(is.na(df$Age))
+```
+so I will try to predict the missing age values.
+
+***
+
+First let's create a new feature called "Title", that will hold the passengers' titles:
+```{r}
+df$Title <- gsub('(.*, )|(\\..*)', '', df$Name)
+```
+Let's count the titles per passenger:
+```{r}
+table(df$Title)
+```
+There are 11 rare titles (Dona, Lady, the Countess, Capt, Col, Don, Dr, Major, Rev, Sir, Jonkheer), and four titles (Mlle, Ms, Mme, Master) that are equivalent to (Miss, Miss, Mrs, Mr) accordingly:
+```{r}
+rareTitles <- c('Dona', 'Lady', 'the Countess','Capt', 'Col', 'Don', 'Dr', 'Major', 'Rev', 'Sir', 'Jonkheer')
+
+df$Title[df$Title == 'Mlle'] <- 'Miss' 
+df$Title[df$Title == 'Ms'] <- 'Miss'
+df$Title[df$Title == 'Mme'] <- 'Mrs'
+df$Title[df$Title == 'Master'] <- 'Mr'
+df$Title[df$Title %in% rareTitles] <- 'Rare Title'
+
+table(df$Title)
+```
+```{r}
+df$Survived <- as.factor(df$Survived)
+df$Pclass <- as.factor(df$Pclass)
+df$Title <- as.factor(df$Title)
+df <- df[,-c(1,4,9,11)]
+```
+ 
+***
+ 
+Now let's handle the missing Age values by imputation using rpart library:
+ 
+```{r results='hide', message=FALSE, warning=FALSE}
+#install.packages("mice")
+library(mice)
+miceMod <- mice(df[, !names(df) %in% "Survived"], method="rf")
+miceOutput <- complete(miceMod)
+df$Age <- miceOutput$Age
+```
+```{r}
+sum(is.na(df$Age))
+```
+Let's apply the same for the two missing values in Embarked and the missing feature in Fare:
+```{r}
+df$Embarked <- miceOutput$Embarked
+df$Fare <- miceOutput$Fare
+```
+
+*That's it for preprocessing*
+
+***
+
+## Now let's do some predicting:
+
+Spliting our data for train and test&evaluation:
+
+```{r}
+set.seed(123)
+train <- df[1:891,] # The actual train data
+test <- df[892:1309,]
+indices <- sample(1:nrow(train), nrow(train) * 0.8)
+ttrain <- train[indices,] 
+ttest <- train[-indices,]
+```
+
+### randomforest from caret package:
+
+```{r results='hide', message=FALSE, warning=FALSE}
+library(caret)
+control <- trainControl(method="cv", number=10)
+metric <- "Accuracy"
+fit.rf <- train(Survived ~ ., data = ttrain, method = "rf", ntree = 10,  metric = metric, trControl = control, tuneGrid = expand.grid(.mtry = c(5)))
+pred <- predict(fit.rf, ttest[, -1])
+```
+```{r}
+mean(pred == ttest$Survived)
+```
+
+**predicting on test data**
+
+```{r eval=FALSE}
+pred <- predict(fit.rf, test)
+res <- cbind(PassengerId = ids, Survived = as.character(pred))
+write.csv(res, file="submissions/rf.csv", row.names = F)
+```
+
+Result: 0.76076
+Rank: 7561
+
+![rf](/images/rf.png)
+
+
+
+<!-- ### randomforest from randomForest package: -->
+
+<!-- ```{r} -->
+<!-- library(randomForest) -->
+<!-- model <- randomForest(Survived ~ ., data = ttrain) -->
+<!-- pred <- predict(model, ttest[, -1]) -->
+<!-- mean(pred == ttest$Survived) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- titanic.rpart <- rpart(Survived ~ ., data = ttrain) -->
+
+<!-- library(rattle) -->
+<!-- library(rpart.plot) -->
+<!-- fancyRpartPlot(titanic.rpart) -->
+
+<!-- pred <- predict(titanic.rpart, ttest[, -1], type = "class") -->
+<!-- mean(pred == ttest$Survived) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- ttrain_1 = data.matrix(ttrain, rownames.force = T) -->
+<!-- indices <- sample(1:nrow(ttrain_1),nrow(ttrain_1)*0.8) -->
+<!-- knnTrain <- ttrain_1[indices,] -->
+<!-- knnTest <- ttrain_1[-indices,] -->
+
+<!-- library(class) -->
+<!-- pred = knn(knnTrain, knnTest, cl=as.factor(knnTrain[,'Survived']), k = 3) -->
+<!-- mean(pred == knnTest[,'Survived']) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- library(e1071) -->
+<!-- train.svm <- svm(as.factor(Survived) ~ ., knnTrain, cost = 1, kernel = 'linear') -->
+<!-- pred <- predict(train.svm, knnTest[,-1]) -->
+<!-- mean(pred == knnTest[,1]) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- train.tune <- tune.svm(as.factor(Survived) ~ ., data = as.data.frame(knnTrain), kernel='polynomial', degree=5, cost=1) -->
+<!-- train.svm <- svm(as.factor(Survived) ~ ., as.data.frame(knnTrain), cost = train.tune$best.model$cost, gamma = train.tune$best.model$gamma, coef0 = train.tune$best.model$coef0, kernel='polynomial', degree=5) -->
+<!-- pred <- predict(train.svm, newdata = knnTest[,-1]) -->
+<!-- mean(pred == knnTest[,1]) -->
+<!-- ``` -->
