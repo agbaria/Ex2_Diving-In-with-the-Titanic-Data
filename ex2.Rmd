@@ -43,10 +43,14 @@ df$Title[df$Title == 'Mlle'] <- 'Miss'
 df$Title[df$Title == 'Ms'] <- 'Miss'
 df$Title[df$Title == 'Mme'] <- 'Mrs'
 df$Title[df$Title == 'Master'] <- 'Mr'
-df$Title[df$Title %in% rareTitles] <- 'Rare Title'
-
+df$Title[df$Title %in% rareTitles] <- 'RareTitle'
+```
+```{r}
 table(df$Title)
 ```
+
+Converting some features to factor, and deleting the uuneeded ones:
+
 ```{r}
 df$Survived <- as.factor(df$Survived)
 df$Pclass <- as.factor(df$Pclass)
@@ -56,7 +60,7 @@ df <- df[,-c(1,4,9,11)]
  
 ***
  
-Now let's handle the missing Age values by imputation using rpart library:
+Now let's handle the missing Age values by imputation:
  
 ```{r results='hide', message=FALSE, warning=FALSE}
 #install.packages("mice")
@@ -68,9 +72,8 @@ df$Age <- miceOutput$Age
 ```{r}
 sum(is.na(df$Age))
 ```
-Let's apply the same for the two missing values in Embarked and the missing feature in Fare:
+Let's apply the same for the missing feature in Fare:
 ```{r}
-df$Embarked <- miceOutput$Embarked
 df$Fare <- miceOutput$Fare
 ```
 
@@ -97,7 +100,7 @@ ttest <- train[-indices,]
 library(caret)
 control <- trainControl(method="cv", number=10)
 metric <- "Accuracy"
-fit.rf <- train(Survived ~ ., data = ttrain, method = "rf", ntree = 10,  metric = metric, trControl = control, tuneGrid = expand.grid(.mtry = c(5)))
+fit.rf <- train(Survived ~ ., data = ttrain, method = "rf", ntree = 10,  metric = metric, trControl = control, tuneGrid = expand.grid(.mtry = c(5)), na.action = na.omit)
 pred <- predict(fit.rf, ttest[, -1])
 ```
 ```{r}
@@ -107,6 +110,10 @@ mean(pred == ttest$Survived)
 **predicting on test data**
 
 ```{r eval=FALSE}
+library(caret)
+control <- trainControl(method="cv", number=10)
+metric <- "Accuracy"
+fit.rf <- train(Survived ~ ., data = train, method = "rf", ntree = 10,  metric = metric, trControl = control, tuneGrid = expand.grid(.mtry = c(5)), na.action = na.omit)
 pred <- predict(fit.rf, test)
 res <- cbind(PassengerId = ids, Survived = as.character(pred))
 write.csv(res, file="submissions/rf.csv", row.names = F)
@@ -115,51 +122,137 @@ write.csv(res, file="submissions/rf.csv", row.names = F)
 Result: 0.76076
 Rank: 7561
 
+[Submitted file](https://github.com/agbaria/Ex2_Diving-In-with-the-Titanic-Data/blob/master/submissions/rf.csv)
+
 ![rf](/images/rf.png)
 
+### randomforest from randomForest package:
+
+```{r results='hide', message=FALSE, warning=FALSE}
+library(randomForest)
+model <- randomForest(Survived ~ ., data = ttrain, na.action = na.omit)
+pred <- predict(model, ttest[, -1])
+```
+```{r}
+mean(pred == ttest$Survived)
+```
+
+**predicting on test data**
+
+```{r eval=FALSE}
+library(randomForest)
+model <- randomForest(Survived ~ ., data = train, na.action = na.omit)
+pred <- predict(model, test)
+res <- cbind(PassengerId = ids, Survived = as.character(pred))
+write.csv(res, file="submissions/randomForest.csv", row.names = F)
+```
+
+Result: 0.78947
+Rank: 3208
+
+[Submitted file](https://github.com/agbaria/Ex2_Diving-In-with-the-Titanic-Data/blob/master/submissions/randomForest.csv)
+
+![rf](/images/randomForest.png)
+
+### Recursive Partitioning and Regression Trees (rpart):
+
+```{r results='hide', message=FALSE, warning=FALSE}
+library(rpart)
+titanic.rpart <- rpart(Survived ~ ., data = ttrain, na.action = na.omit)
+
+library(rattle)
+library(rpart.plot)
+```
+```{r}
+fancyRpartPlot(titanic.rpart)
+
+pred <- predict(titanic.rpart, ttest[, -1], type = "class")
+mean(pred == ttest$Survived)
+```
+
+**predicting on test data**
+
+```{r eval=FALSE}
+titanic.rpart <- rpart(Survived ~ ., data = train, na.action = na.omit)
+pred <- predict(titanic.rpart, test, type = "class")
+res <- cbind(PassengerId = ids, Survived = as.character(pred))
+write.csv(res, file="submissions/rpart.csv", row.names = F)
+```
+
+Result: 0.79904
+Rank: 
+
+[Submitted file](https://github.com/agbaria/Ex2_Diving-In-with-the-Titanic-Data/blob/master/submissions/rpart.csv)
+
+![rf](/images/rpart.png)
+
+### SVM:
+
+```{r results='hide', message=FALSE, warning=FALSE}
+train1 <- data.matrix(train, rownames.force = T)
+train1[,'Survived'] <- train1[,'Survived'] - 1
+test1 <- data.matrix(test, rownames.force = T)
+```
+
+```{r results='hide', message=FALSE, warning=FALSE}
+library(e1071)
+train.svm <- svm(as.factor(Survived) ~ ., train1, cost = 1, kernel = 'linear')
+pred <- predict(train.svm, test1[,-1])
+res <- cbind(PassengerId = ids, Survived = as.character(pred))
+write.csv(res, file="submissions/svm.csv", row.names = F)
+```
+
+Result: 0.76555
+
+[Submitted file](https://github.com/agbaria/Ex2_Diving-In-with-the-Titanic-Data/blob/master/submissions/svm.csv)
+
+![rf](/images/svm.png)
+
+**The best table rank**
+
+![rf](/images/rank.png)
 
 
-<!-- ### randomforest from randomForest package: -->
+### Ensemble
 
-<!-- ```{r} -->
-<!-- library(randomForest) -->
-<!-- model <- randomForest(Survived ~ ., data = ttrain) -->
-<!-- pred <- predict(model, ttest[, -1]) -->
-<!-- mean(pred == ttest$Survived) -->
-<!-- ``` -->
+```{r}
+levels(ttrain$Survived) <- c("n", "y")
+levels(ttest$Survived) <- c("n", "y")
+str(ttrain)
+str(ttest)
+```
 
-<!-- ```{r} -->
-<!-- titanic.rpart <- rpart(Survived ~ ., data = ttrain) -->
+```{r results='hide', message=FALSE, warning=FALSE}
+library(caretEnsemble)
+library(caret)
+control <- trainControl(
+  method="boot",
+  number=25,
+  savePredictions="final",
+  classProbs=TRUE,
+  summaryFunction=twoClassSummary
+  )
 
-<!-- library(rattle) -->
-<!-- library(rpart.plot) -->
-<!-- fancyRpartPlot(titanic.rpart) -->
+model_list <- caretList(
+  Survived ~ ., data=na.omit(ttrain),
+  trControl=control,
+  metric = "ROC",
+  methodList=c("glm", "rpart")
+)
 
-<!-- pred <- predict(titanic.rpart, ttest[, -1], type = "class") -->
-<!-- mean(pred == ttest$Survived) -->
-<!-- ``` -->
+p <- as.data.frame(predict(model_list, newdata=na.omit(ttest)))
+```
+```{r}
+print(p)
+```
 
-<!-- ```{r} -->
-<!-- ttrain_1 = data.matrix(ttrain, rownames.force = T) -->
-<!-- indices <- sample(1:nrow(ttrain_1),nrow(ttrain_1)*0.8) -->
-<!-- knnTrain <- ttrain_1[indices,] -->
-<!-- knnTest <- ttrain_1[-indices,] -->
+```{r}
+results <- resamples(model_list)
+summary(results)
+modelCor(results)
+splom(results)
+```
 
-<!-- library(class) -->
-<!-- pred = knn(knnTrain, knnTest, cl=as.factor(knnTrain[,'Survived']), k = 3) -->
-<!-- mean(pred == knnTest[,'Survived']) -->
-<!-- ``` -->
+*Couldn't go any further from here. I searched alot for examples on how to use ensembles for classification, but got no Result*
 
-<!-- ```{r} -->
-<!-- library(e1071) -->
-<!-- train.svm <- svm(as.factor(Survived) ~ ., knnTrain, cost = 1, kernel = 'linear') -->
-<!-- pred <- predict(train.svm, knnTest[,-1]) -->
-<!-- mean(pred == knnTest[,1]) -->
-<!-- ``` -->
 
-<!-- ```{r} -->
-<!-- train.tune <- tune.svm(as.factor(Survived) ~ ., data = as.data.frame(knnTrain), kernel='polynomial', degree=5, cost=1) -->
-<!-- train.svm <- svm(as.factor(Survived) ~ ., as.data.frame(knnTrain), cost = train.tune$best.model$cost, gamma = train.tune$best.model$gamma, coef0 = train.tune$best.model$coef0, kernel='polynomial', degree=5) -->
-<!-- pred <- predict(train.svm, newdata = knnTest[,-1]) -->
-<!-- mean(pred == knnTest[,1]) -->
-<!-- ``` -->
